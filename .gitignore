@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+.DS_Store
+
+# outputs de entrenamiento (regenerables)
+**/checkpoints/
+*.pt
+*.bin
+
+# dataset cache
+tinyshakespeare*.txt
