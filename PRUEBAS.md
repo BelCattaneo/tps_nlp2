@@ -107,3 +107,24 @@ Formato por entrada:
 - La ganancia de val loss es modesta a esta escala (100k caracteres, 2 epochs) — MoE brilla en corpus grandes donde la especialización de expertos rinde.
 
 ---
+
+## 2026-09-20 — TP-I — Consigna VII — utilización de expertos (MoE denso)
+
+**Config:** `moe_model` entrenado. `expert_utilization(moe_model, val_loader, n_batches=20)`. Fracciones normalizadas a "porción de tokens que pasan por cada experto" (sum = k por capa, ideal = k/E = 0.5).
+
+**Métricas:**
+
+| Capa | e0 | e1 | e2 | e3 | ¿Balanceada? |
+|:---:|---:|---:|---:|---:|:---|
+| 0 | 0.609 | 0.469 | 0.537 | 0.386 | Sí, entre 0.39 y 0.61 |
+| 1 | 0.00005 | 0.999 | 0.016 | 0.985 | No — colapso total a e1 y e3 |
+
+**Observaciones:**
+- Capa 0 está balanceada dentro de un rango razonable (todos entre 0.39 y 0.61, ideal 0.5).
+- **Capa 1 colapsó totalmente**: e1 y e3 reciben ~100% de los tokens cada uno (o sea, todos los tokens siempre se rutean a esos dos). e0 y e2 están muertos (<2%).
+- El colapso se refuerza solo: los expertos no elegidos no reciben gradiente, la gate aprende a bajar aún más su score, ciclo winner-take-all clásico.
+- Sin loss auxiliar de balanceo (Switch Transformers, ec. 4), nada contrarresta el colapso.
+- La Capa 1 (cerca de la loss) colapsó más que la Capa 0 — argumento probable: gradientes más fuertes cerca de la loss aceleran el winner-take-all.
+- La gate aprende sólo sobre los expertos que efectivamente elige (topk retorna gradiente a través de los valores seleccionados; los índices son discretos y no llevan gradiente). Los expertos que dejan de ser seleccionados quedan congelados en la inicialización.
+
+---
