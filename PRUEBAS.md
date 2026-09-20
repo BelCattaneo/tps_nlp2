@@ -89,3 +89,21 @@ Formato por entrada:
 - Consistente con el patrón "jerárquico" típico en transformers entrenados: local en capas bajas, más global en capas altas.
 
 ---
+
+## 2026-09-20 — TP-I — Consigna V + VI — implementación y entrenamiento de MoE
+
+**Config:** GPTConfig default + `ff_class=MoEFFN`, `MoEArgs(num_experts=4, num_experts_per_token=2)`. MPS, seed 1337, 2 epochs.
+
+**Métricas:**
+- Parámetros MoE: 305.088 (100% entrenables). Denso equivalente: 106.048. Ratio: **2.88×**.
+- `check_moe()` pasó los 4 asserts (shape preservada, gradientes a expertos y gate, k=1 ≡ experto seleccionado, ruteo por token).
+- Epoch 1: train 2.0436 · val 1.9321. Throughput: 40 it/s (train) vs 149 it/s del denso — **~3.7× más lento por paso**.
+- Epoch 2: train 1.9657 · val 1.8580. Throughput: 70 it/s (train) — mejora tras JIT warm.
+- Val loss final: **denso 1.9845 vs MoE 1.8580** — mejora de 0.126.
+
+**Observaciones:**
+- El MoE mejora la calidad (val loss más baja) con casi 3× los parámetros totales pero mismo cómputo por token (~50% de expertos activos + overhead de gate).
+- El MoE es ~30× más lento por paso durante entrenamiento (ver Consigna IX pendiente): loop de Python sobre expertos, kernels chicos, gathers de forma variable. Aritmética similar al denso; el costo lo domina el overhead.
+- La ganancia de val loss es modesta a esta escala (100k caracteres, 2 epochs) — MoE brilla en corpus grandes donde la especialización de expertos rinde.
+
+---
