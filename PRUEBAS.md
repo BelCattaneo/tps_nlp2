@@ -128,3 +128,45 @@ Formato por entrada:
 - La gate aprende sólo sobre los expertos que efectivamente elige (topk retorna gradiente a través de los valores seleccionados; los índices son discretos y no llevan gradiente). Los expertos que dejan de ser seleccionados quedan congelados en la inicialización.
 
 ---
+
+## 2026-09-20 — TP-I — Consigna VIII — DeepSeekMoE
+
+**Config:** `SEGMENTS=2` → 8 expertos ruteados de hidden 128 + 1 shared expert de hidden 128, top-4 por token. Comparación contra MoE original (4 expertos de hidden 256, top-2).
+
+**Parámetros y cómputo:**
+- MoE original: 305.088 parámetros. Cómputo por token FFN: 2 × (64→256→64) ≈ 65k ops.
+- DeepSeekMoE: 339.264 parámetros (~11% más por el shared expert). Cómputo por token FFN: 4 × (64→128→64) + 1 × (64→128→64) = 5 × 16k ≈ 82k ops (~25% más).
+- Segmentación fina sola es neutra en params y cómputo; el shared es el que suma.
+
+**Métricas:**
+
+| Modelo | Params | Val loss | Speed (it/s epoch 2) |
+|---|---:|---:|---:|
+| Denso | 106.048 | 1.9845 | 226 |
+| MoE (VI) | 305.088 | 1.8580 | 70 |
+| DeepSeekMoE | 339.264 | **1.8363** | 38 |
+
+- DS beat MoE por 0.022 en val loss. Reproduce la dirección del paper pero no la magnitud.
+- Costo: ~40% más de tiempo por paso vs MoE.
+
+**Utilización de expertos (DS, val_loader):**
+
+| Capa | Fracciones (ideal k/E = 0.5) | Diagnóstico |
+|:---:|---|:---|
+| 0 | [0.50, 0.56, 0.69, 0.43, 0.45, 0.57, 0.29, 0.51] | Balanceada — todos entre 0.29 y 0.69, ninguno muerto. |
+| 1 | [0.83, 0.003, 0.87, 0.10, 1.00, 0.028, 0.17, 1.00] | Colapso parcial — 4 dominan (0.83–1.00), 4 casi muertos (0.003–0.17). Ninguno *totalmente* muerto (a diferencia del MoE original que dejaba e0 en 0.005%). |
+
+- Comparado con el MoE (Capa 1 con 2 fully active + 2 dead), el DS tiene 4 fully active + 4 casi-dead. Proporcionalmente el desbalance es similar, pero absolutamente hay más flexibilidad (los "perdedores" reciben algo de gradiente y podrían recuperarse).
+
+**Magnitud shared vs routed (Block 0):**
+- Norma L2 promedio shared: 7.08.
+- Norma L2 promedio routed: 18.99.
+- Ratio shared/routed: **0.37**.
+- Interpretación: consistente con el paper — el shared aporta menos magnitud (estructura común es "chica de fondo") mientras los ruteados agregan detalle especializado con mayor magnitud. Si el shared se hubiera convertido en "otra FFN densa", esperaríamos ratio ~1.
+- Caveat: la magnitud sola no prueba que la salida sea *común* entre tokens; sería necesario medir correlación o hacer ablation.
+
+**Conclusiones:**
+- La razón más probable de la reproducción parcial es **escala**: paper corre en modelos 10.000× más grandes con 1.000.000× más datos. Segmentación fina necesita diversidad de datos para que expertos especialicen; shared expert necesita "trabajo común" abundante para aislar.
+- Experimento más chico para testear escala como explicación: reentrenar los tres modelos con `N_CHARS = 1M` (o corpus completo tinyshakespeare) manteniendo la arquitectura idéntica. Si la brecha DS–MoE crece con más datos, escala es al menos parte de la explicación.
+
+---
