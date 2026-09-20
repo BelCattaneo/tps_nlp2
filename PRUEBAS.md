@@ -55,3 +55,25 @@ Formato por entrada:
 - Config propuesta para producción: **T=0.8 + top_p=0.9**. Racional: temperatura reduce el ruido de la distribución cruda, top-p elimina la cola y se adapta al contexto — es el estándar en la industria por este motivo.
 
 ---
+
+## 2026-09-20 — TP-I — Consigna III — benchmark KV-cache
+
+**Config:** modelo denso ya entrenado. MPS. `benchmark_cache(lengths=(50,100,200,400), repeats=3)`. Prompt `"To be"`, `do_sample=False` (greedy), warm-up de 1 corrida por config antes de medir. Sincronización MPS antes y después de cada medición.
+
+**Métricas:**
+
+| length | con cache (s) | sin cache (s) | speedup |
+|---:|---:|---:|---:|
+| 50 | 0.101 | 0.117 | 1.16× |
+| 100 | 0.109 | 0.120 | 1.09× |
+| 200 | 0.172 | 0.169 | 0.98× |
+| 400 | 0.238 | 0.240 | 1.01× |
+
+**Observaciones:**
+- La teoría O(N²) → O(N) **no se materializa** a esta escala. Speedups ≤ 1.16× para secuencias cortas, ≈ 1 para largas.
+- Motivo principal: `block_size = 32` acota el trabajo "sin cache". Sin cache, cada paso procesa como mucho los últimos 32 tokens (`idx_cond = idx[:, -block_size:]`), no toda la historia. Ambas ramas quedan O(N × 32) = O(N).
+- A este tamaño de modelo (n_embd=64, head_dim=16), los matmuls son diminutos: el tiempo lo domina el overhead fijo por paso (kernel launches, dispatch, Python) que el cache no reduce.
+- El cache además paga overhead propio: `unbind`, `cat`, `stack` y allocs por paso. Del mismo orden que lo que ahorra en aritmética.
+- El cache **sí ganaría** en modelo grande (matmuls dominantes), block_size grande (más re-cómputo sin cache), y con Flash Attention (menos overhead de gestión).
+
+---
