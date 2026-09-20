@@ -12,7 +12,7 @@ Repositorio de entregas de los TPs de NLP-II / LLMs y GenIA de la CEIA (FIUBA).
 ```bash
 cd TP-I
 python -m venv .venv && source .venv/bin/activate
-pip install torch matplotlib numpy tqdm httpx tiktoken jupyter
+pip install torch matplotlib numpy tqdm httpx tiktoken jupyter transformers
 # opcional, sólo CUDA:
 # pip install bitsandbytes
 jupyter notebook TP1_TinyGPT_es.ipynb

@@ -116,15 +116,15 @@ Formato por entrada:
 
 | Capa | e0 | e1 | e2 | e3 | ¿Balanceada? |
 |:---:|---:|---:|---:|---:|:---|
-| 0 | 0.609 | 0.469 | 0.537 | 0.386 | Sí, entre 0.39 y 0.61 |
-| 1 | 0.00005 | 0.999 | 0.016 | 0.985 | No — colapso total a e1 y e3 |
+| 1 | 0.609 | 0.469 | 0.537 | 0.386 | Sí, entre 0.39 y 0.61 |
+| 2 | 0.00005 | 0.999 | 0.016 | 0.985 | No — colapso total a e1 y e3 |
 
 **Observaciones:**
-- Capa 0 está balanceada dentro de un rango razonable (todos entre 0.39 y 0.61, ideal 0.5).
-- **Capa 1 colapsó totalmente**: e1 y e3 reciben ~100% de los tokens cada uno (o sea, todos los tokens siempre se rutean a esos dos). e0 y e2 están muertos (<2%).
+- Capa 1 está balanceada dentro de un rango razonable (todos entre 0.39 y 0.61, ideal 0.5).
+- **Capa 2 colapsó totalmente**: e1 y e3 reciben ~100% de los tokens cada uno (o sea, todos los tokens siempre se rutean a esos dos). e0 y e2 están muertos (<2%).
 - El colapso se refuerza solo: los expertos no elegidos no reciben gradiente, la gate aprende a bajar aún más su score, ciclo winner-take-all clásico.
 - Sin loss auxiliar de balanceo (Switch Transformers, ec. 4), nada contrarresta el colapso.
-- La Capa 1 (cerca de la loss) colapsó más que la Capa 0 — argumento probable: gradientes más fuertes cerca de la loss aceleran el winner-take-all.
+- La Capa 2 (cerca de la loss) colapsó más que la Capa 1 — argumento probable: gradientes más fuertes cerca de la loss aceleran el winner-take-all.
 - La gate aprende sólo sobre los expertos que efectivamente elige (topk retorna gradiente a través de los valores seleccionados; los índices son discretos y no llevan gradiente). Los expertos que dejan de ser seleccionados quedan congelados en la inicialización.
 
 ---
@@ -153,12 +153,12 @@ Formato por entrada:
 
 | Capa | Fracciones (ideal k/E = 0.5) | Diagnóstico |
 |:---:|---|:---|
-| 0 | [0.50, 0.56, 0.69, 0.43, 0.45, 0.57, 0.29, 0.51] | Balanceada — todos entre 0.29 y 0.69, ninguno muerto. |
-| 1 | [0.83, 0.003, 0.87, 0.10, 1.00, 0.028, 0.17, 1.00] | Colapso parcial — 4 dominan (0.83–1.00), 4 casi muertos (0.003–0.17). Ninguno *totalmente* muerto (a diferencia del MoE original que dejaba e0 en 0.005%). |
+| 1 | [0.50, 0.56, 0.69, 0.43, 0.45, 0.57, 0.29, 0.51] | Balanceada — todos entre 0.29 y 0.69, ninguno muerto. |
+| 2 | [0.83, 0.003, 0.87, 0.10, 1.00, 0.028, 0.17, 1.00] | Colapso parcial — 4 dominan (0.83–1.00), 4 casi muertos (0.003–0.17). Ninguno *totalmente* muerto (a diferencia del MoE original que dejaba e0 en 0.005%). |
 
-- Comparado con el MoE (Capa 1 con 2 fully active + 2 dead), el DS tiene 4 fully active + 4 casi-dead. Proporcionalmente el desbalance es similar, pero absolutamente hay más flexibilidad (los "perdedores" reciben algo de gradiente y podrían recuperarse).
+- Comparado con el MoE (Capa 2 con 2 fully active + 2 dead), el DS tiene 4 fully active + 4 casi-dead. Proporcionalmente el desbalance es similar, pero absolutamente hay más flexibilidad (los "perdedores" reciben algo de gradiente y podrían recuperarse).
 
-**Magnitud shared vs routed (Block 0):**
+**Magnitud shared vs routed (Bloque 1):**
 - Norma L2 promedio shared: 7.08.
 - Norma L2 promedio routed: 18.99.
 - Ratio shared/routed: **0.37**.
@@ -239,10 +239,10 @@ Cuatro variantes probadas en total. Solo `MoELayerFast` ganó. Las otras tres em
 
 | Capa | e0 | e1 | e2 | e3 | Diagnóstico |
 |:---:|---:|---:|---:|---:|:---|
-| MoE original 0 | 0.609 | 0.469 | 0.537 | 0.386 | balanceada |
-| MoE balanced 0 | 0.435 | 0.425 | 0.537 | 0.603 | balanceada (más apretada al ideal 0.5) |
-| MoE original 1 | 0.00005 | 0.999 | 0.016 | 0.985 | colapso total (2 expertos muertos) |
-| MoE balanced 1 | 0.221 | 0.503 | 0.276 | 0.9999 | mejora parcial: e0/e2 resucitados, e3 sigue dominante |
+| MoE original 1 | 0.609 | 0.469 | 0.537 | 0.386 | balanceada |
+| MoE balanced 1 | 0.435 | 0.425 | 0.537 | 0.603 | balanceada (más apretada al ideal 0.5) |
+| MoE original 2 | 0.00005 | 0.999 | 0.016 | 0.985 | colapso total (2 expertos muertos) |
+| MoE balanced 2 | 0.221 | 0.503 | 0.276 | 0.9999 | mejora parcial: e0/e2 resucitados, e3 sigue dominante |
 
 **Observaciones:**
 - La aux loss evitó las muertes de expertos (e0 pasó de 0.005% a 22%, e2 de 1.6% a 28%) pero no logró desplazar a e3 (0.985 → 0.9999). Mejora parcial, no balance completo.
