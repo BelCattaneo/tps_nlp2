@@ -170,3 +170,51 @@ Formato por entrada:
 - Experimento más chico para testear escala como explicación: reentrenar los tres modelos con `N_CHARS = 1M` (o corpus completo tinyshakespeare) manteniendo la arquitectura idéntica. Si la brecha DS–MoE crece con más datos, escala es al menos parte de la explicación.
 
 ---
+
+## 2026-09-20 — TP-I — Consigna IX — MoELayerFast (optimización de MoELayer)
+
+**Config:** MPS. Batch `(64, 32, 64)`. Media ± desvío sobre 50 forwards, warmup=5. Comparación aislada de la capa, no del modelo entero.
+
+**Cambio implementado:** eliminación de sincronizadores GPU→CPU dentro del loop de expertos. En vez de máscaras booleanas por experto (`==`, `.any()`, `.nonzero()` × E), la fast ordena todos los pares `(token, slot)` con `torch.sort` una sola vez y usa slices contiguos con offsets precomputados. 1 sync en vez de E.
+
+**Métricas:**
+
+| Implementación | Tiempo por forward | Variance |
+|---|---:|---:|
+| MoELayer (V) | 12.94 ± 2.96 ms | alta |
+| MoELayerFast (IX) | 10.45 ± 0.44 ms | 6.7× menor |
+| **Speedup** | **1.24×** | — |
+
+- Correctitud verificada con `test_moe_equivalence`: max abs diff ~1e-7 (dentro de tolerancia float32).
+
+**Observaciones:**
+- Ganancia modesta (1.24×) porque E=4 es chico — sólo eliminamos ~3 syncs por forward.
+- Lo más informativo: variance 6.7× menor. La baseline tenía picos por syncs impredecibles; la fast es consistente.
+- Con E=8 (SEGMENTS=2) o E=16 (SEGMENTS=4) el speedup crecería porque la cantidad de syncs eliminados escala con E.
+- Direcciones sin probar (potencial más ganancia): batched experts con `torch.bmm` + padding a capacidad fija (Megablocks-style).
+
+### Experimentos adicionales — dos variantes que empeoraron
+
+Cuatro variantes probadas en total. Solo `MoELayerFast` ganó. Las otras tres empeoraron, lo cual es informativo por sí mismo:
+
+| Variante | Tiempo | vs baseline | Correctitud |
+|---|---:|---:|:---|
+| MoELayer (V) | 12.94 ± 2.96 ms | 1.00× | ✓ referencia |
+| **MoELayerFast (IX)** | **10.45 ± 0.44 ms** | **1.24×** | ✓ equivalente numéricamente (max diff ~1e-7) |
+| MoELayerFast + torch.compile | 24.45 ± 1.74 ms | 0.53× | ✓ pero 1.9× más lenta |
+| MoELayerBatched (cap=1.5, bmm+pad) | 13.40 ± 0.39 ms | 0.97× | padding + descartes posibles |
+| MoELayerBatched (cap=1.0, bmm+pad) | 14.16 ± 4.54 ms | 0.91× | descartes más probables → mayor variance |
+
+**Por qué `torch.compile` empeoró**:
+1. MPS no tiene backend maduro para el compile de PyTorch (no genera kernels fusionados como CUDA con Triton). Cae a paths eager con overhead extra.
+2. El costo fijo de dispatch/cache lookup no se amortiza a este tamaño de layer.
+3. Shapes dinámicas (`offsets.tolist()` produce longitudes data-dependientes) fuerza recompilaciones.
+
+**Por qué `MoELayerBatched` no ganó**:
+1. Padding a capacidad fija hace ~50% más aritmética que la mínima (con `cap=1.5`). Sin padding (`cap=1.0`), aumentan los descartes y la variance.
+2. `torch.bmm` sobre `(E=4, cap, 64)` no es más rápido que 4 `Linear` sueltos en MPS a este tamaño — el hardware está sub-utilizado en ambos casos.
+3. Los `scatter/gather` con indexación avanzada (`expert_input[experts, ranks] = ...`) agregan kernels que compensan lo ahorrado.
+
+**Conclusión**: la única ganancia real a esta escala en MPS vino de eliminar syncs (`.any()`, `.nonzero()`) del loop de expertos. Batched matmul y `torch.compile` — las "big guns" del stack de MoE en producción — no aplican para modelos y hardware chicos. En CUDA con `E=64` y `n_embd=4096` la historia sería totalmente distinta.
+
+---
