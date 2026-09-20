@@ -218,3 +218,37 @@ Cuatro variantes probadas en total. Solo `MoELayerFast` ganó. Las otras tres em
 **Conclusión**: la única ganancia real a esta escala en MPS vino de eliminar syncs (`.any()`, `.nonzero()`) del loop de expertos. Batched matmul y `torch.compile` — las "big guns" del stack de MoE en producción — no aplican para modelos y hardware chicos. En CUDA con `E=64` y `n_embd=4096` la historia sería totalmente distinta.
 
 ---
+
+## 2026-09-20 — TP-I — Opcional — loss auxiliar de balanceo de carga (Switch Transformer)
+
+**Estrategia:** duplicar `MoELayer → MoELayerBalanced` sin modificar el original. La diferencia única es guardar `_live_gate_probs` con gradiente (además del `last_gate_probs.detach()` que necesita `expert_utilization`). Custom training loop (no el Trainer estándar) que computa `total_loss = ce_loss + alpha * load_balancing_loss(model)`.
+
+**Config:** `moe_model_balanced` con `MoEFFNBalanced` (usa `MoELayerBalanced`). Misma arquitectura que `moe_model` (4 expertos, top-2, n_embd=64, 2 capas). `alpha=0.01`, `lr=1e-3`, 2 epochs.
+
+**Métricas de training:**
+
+| Epoch | Train (ce) | Val (ce) | Aux |
+|:---:|---:|---:|---:|
+| 1 | 3.0028 | 2.1328 | 1.3128 |
+| 2 | 2.1929 | 2.0329 | 1.3715 |
+
+- Val loss final: 2.03 vs 1.86 del MoE original — 9% peor por el precio del balanceo.
+- Aux se estabilizó en ~1.37 (mínimo teórico 1.0 con balance perfecto, máximo 4.0 con colapso total).
+
+**Utilización comparativa (val_loader):**
+
+| Capa | e0 | e1 | e2 | e3 | Diagnóstico |
+|:---:|---:|---:|---:|---:|:---|
+| MoE original 0 | 0.609 | 0.469 | 0.537 | 0.386 | balanceada |
+| MoE balanced 0 | 0.435 | 0.425 | 0.537 | 0.603 | balanceada (más apretada al ideal 0.5) |
+| MoE original 1 | 0.00005 | 0.999 | 0.016 | 0.985 | colapso total (2 expertos muertos) |
+| MoE balanced 1 | 0.221 | 0.503 | 0.276 | 0.9999 | mejora parcial: e0/e2 resucitados, e3 sigue dominante |
+
+**Observaciones:**
+- La aux loss evitó las muertes de expertos (e0 pasó de 0.005% a 22%, e2 de 1.6% a 28%) pero no logró desplazar a e3 (0.985 → 0.9999). Mejora parcial, no balance completo.
+- Con `alpha=0.01` la aux loss llegó a su mínimo local viable: verificado matemáticamente que `L_aux = E * sum(f²) ≈ 1.38` con la distribución observada, coincide con el aux observado 1.37. El modelo alcanzó un óptimo donde P sigue a f, pero f está lejos del uniforme porque e3 es estructuralmente "necesario" para la tarea principal.
+- Con `alpha` más grande (0.05 o 0.1) probablemente forzaría a mover e3, a costa de más degradación en val loss. Trade-off explícito entre balance y performance.
+
+**Conclusión educativa:** la aux loss funciona, pero a esta escala (100k chars, modelo chico, 2 epochs) el trade-off no gana claramente. Evita el colapso completo pero degrada la calidad. En modelos grandes con corpus abundantes esta técnica es lo que permite que MoE escale sin colapsar; a escala chica, quizás sea mejor dejar que el modelo "colapse" a usar 2 expertos como si fuera denso.
+
+---
