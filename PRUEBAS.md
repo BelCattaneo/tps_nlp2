@@ -20,8 +20,8 @@ Formato por entrada:
 
 **Métricas:**
 - Modelo denso entrenado: 106.048 parámetros (100% entrenables).
-- Epoch 1: train 2.1788 · val 2.0508.
-- Epoch 2: train 2.0885 · val 1.9845.
+- Epoch 1: train 2.1788 · val 2.0506.
+- Epoch 2: train 2.0880 · val 1.9842.
 - Throughput época 1: 149 it/s (train), 267 it/s (val). Época 2: 226 it/s / 552 it/s (JIT warm).
 - 1405 batches de train, 155 de val.
 - `generateV2` implementada. `self_check()` pasó los 4 asserts (greedy determinístico, top_k=1 ≡ greedy, T→0 ≡ greedy, top_p→0 preserva sólo el más probable).
@@ -64,10 +64,10 @@ Formato por entrada:
 
 | length | con cache (s) | sin cache (s) | speedup |
 |---:|---:|---:|---:|
-| 50 | 0.101 | 0.117 | 1.16× |
-| 100 | 0.109 | 0.120 | 1.09× |
-| 200 | 0.172 | 0.169 | 0.98× |
-| 400 | 0.238 | 0.240 | 1.01× |
+| 50 | 0.074 | 0.073 | 0.99× |
+| 100 | 0.112 | 0.091 | 0.82× |
+| 200 | 0.140 | 0.141 | 1.01× |
+| 400 | 0.237 | 0.268 | 1.13× |
 
 **Observaciones:**
 - La teoría O(N²) → O(N) **no se materializa** a esta escala. Speedups ≤ 1.16× para secuencias cortas, ≈ 1 para largas.
@@ -97,9 +97,9 @@ Formato por entrada:
 **Métricas:**
 - Parámetros MoE: 305.088 (100% entrenables). Denso equivalente: 106.048. Ratio: **2.88×**.
 - `check_moe()` pasó los 4 asserts (shape preservada, gradientes a expertos y gate, k=1 ≡ experto seleccionado, ruteo por token).
-- Epoch 1: train 2.0436 · val 1.9321. Throughput: 40 it/s (train) vs 149 it/s del denso — **~3.7× más lento por paso**.
-- Epoch 2: train 1.9657 · val 1.8580. Throughput: 70 it/s (train) — mejora tras JIT warm.
-- Val loss final: **denso 1.9845 vs MoE 1.8580** — mejora de 0.126.
+- Epoch 1: train 2.0904 · val 1.9676. Throughput: 40 it/s (train) vs 149 it/s del denso — **~3.7× más lento por paso**.
+- Epoch 2: train 2.0177 · val 1.8935. Throughput: 70 it/s (train) — mejora tras JIT warm.
+- Val loss final: **denso 1.9842 vs MoE 1.8935** — mejora de 0.091.
 
 **Observaciones:**
 - El MoE mejora la calidad (val loss más baja) con casi 3× los parámetros totales pero mismo cómputo por token (~50% de expertos activos + overhead de gate).
@@ -116,12 +116,12 @@ Formato por entrada:
 
 | Capa | e0 | e1 | e2 | e3 | ¿Balanceada? |
 |:---:|---:|---:|---:|---:|:---|
-| 1 | 0.609 | 0.469 | 0.537 | 0.386 | Sí, entre 0.39 y 0.61 |
-| 2 | 0.00005 | 0.999 | 0.016 | 0.985 | No — colapso total a e1 y e3 |
+| 1 | 0.414 | 0.624 | 0.666 | 0.296 | Sí, entre 0.30 y 0.67 |
+| 2 | 0.001 | 0.001 | 0.999 | 0.999 | No — colapso total a e2 y e3 |
 
 **Observaciones:**
-- Capa 1 está balanceada dentro de un rango razonable (todos entre 0.39 y 0.61, ideal 0.5).
-- **Capa 2 colapsó totalmente**: e1 y e3 reciben ~100% de los tokens cada uno (o sea, todos los tokens siempre se rutean a esos dos). e0 y e2 están muertos (<2%).
+- Capa 1 está balanceada dentro de un rango razonable (todos entre 0.30 y 0.67, ideal 0.5).
+- **Capa 2 colapsó totalmente**: e2 y e3 reciben ~100% de los tokens cada uno (o sea, todos los tokens siempre se rutean a esos dos). e0 y e1 están muertos (<0.1%).
 - El colapso se refuerza solo: los expertos no elegidos no reciben gradiente, la gate aprende a bajar aún más su score, ciclo winner-take-all clásico.
 - Sin loss auxiliar de balanceo (Switch Transformers, ec. 4), nada contrarresta el colapso.
 - La Capa 2 (cerca de la loss) colapsó más que la Capa 1 — argumento probable: gradientes más fuertes cerca de la loss aceleran el winner-take-all.
@@ -142,26 +142,26 @@ Formato por entrada:
 
 | Modelo | Params | Val loss | Speed (it/s epoch 2) |
 |---|---:|---:|---:|
-| Denso | 106.048 | 1.9845 | 226 |
-| MoE (VI) | 305.088 | 1.8580 | 70 |
-| DeepSeekMoE | 339.264 | **1.8363** | 38 |
+| Denso | 106.048 | 1.9842 | 226 |
+| MoE (VI) | 305.088 | 1.8935 | 70 |
+| DeepSeekMoE | 339.264 | **1.8746** | 38 |
 
-- DS beat MoE por 0.022 en val loss. Reproduce la dirección del paper pero no la magnitud.
+- DS beat MoE por 0.019 en val loss. Reproduce la dirección del paper pero no la magnitud.
 - Costo: ~40% más de tiempo por paso vs MoE.
 
 **Utilización de expertos (DS, val_loader):**
 
 | Capa | Fracciones (ideal k/E = 0.5) | Diagnóstico |
 |:---:|---|:---|
-| 1 | [0.50, 0.56, 0.69, 0.43, 0.45, 0.57, 0.29, 0.51] | Balanceada — todos entre 0.29 y 0.69, ninguno muerto. |
-| 2 | [0.83, 0.003, 0.87, 0.10, 1.00, 0.028, 0.17, 1.00] | Colapso parcial — 4 dominan (0.83–1.00), 4 casi muertos (0.003–0.17). Ninguno *totalmente* muerto (a diferencia del MoE original que dejaba e0 en 0.005%). |
+| 1 | [0.42, 0.41, 0.54, 0.47, 0.44, 0.45, 0.74, 0.53] | Balanceada — todos entre 0.41 y 0.74, ninguno muerto. |
+| 2 | [0.39, 0.003, 0.31, 0.99, 0.99, 0.99, 0.02, 0.31] | Colapso parcial — 3 dominan (0.99), 2 casi muertos (0.003, 0.02), 3 con utilización intermedia (0.31–0.39). Ninguno *totalmente* muerto (a diferencia del MoE original que dejaba experts en 0.001). |
 
-- Comparado con el MoE (Capa 2 con 2 fully active + 2 dead), el DS tiene 4 fully active + 4 casi-dead. Proporcionalmente el desbalance es similar, pero absolutamente hay más flexibilidad (los "perdedores" reciben algo de gradiente y podrían recuperarse).
+- Comparado con el MoE (Capa 2 con 2 fully active + 2 dead), el DS tiene 3 fully active + 2 casi-dead + 3 intermedios. Proporcionalmente el desbalance sigue presente pero absolutamente hay más flexibilidad (los "perdedores" e intermedios reciben algo de gradiente y podrían recuperarse).
 
 **Magnitud shared vs routed (Bloque 1):**
-- Norma L2 promedio shared: 7.08.
-- Norma L2 promedio routed: 18.99.
-- Ratio shared/routed: **0.37**.
+- Norma L2 promedio shared: 6.45.
+- Norma L2 promedio routed: 15.81.
+- Ratio shared/routed: **0.41**.
 - Interpretación: consistente con el paper — el shared aporta menos magnitud (estructura común es "chica de fondo") mientras los ruteados agregan detalle especializado con mayor magnitud. Si el shared se hubiera convertido en "otra FFN densa", esperaríamos ratio ~1.
 - Caveat: la magnitud sola no prueba que la salida sea *común* entre tokens; sería necesario medir correlación o hacer ablation.
 
@@ -181,16 +181,15 @@ Formato por entrada:
 
 | Implementación | Tiempo por forward | Variance |
 |---|---:|---:|
-| MoELayer (V) | 12.94 ± 2.96 ms | alta |
-| MoELayerFast (IX) | 10.45 ± 0.44 ms | 6.7× menor |
-| **Speedup** | **1.24×** | — |
+| MoELayer (V) | 12.54 ± 1.54 ms | baseline |
+| MoELayerFast (IX) | 12.27 ± 9.01 ms | alta en esta corrida |
+| **Speedup** | **1.02×** | — |
 
 - Correctitud verificada con `test_moe_equivalence`: max abs diff ~1e-7 (dentro de tolerancia float32).
 
 **Observaciones:**
-- Ganancia modesta (1.24×) porque E=4 es chico — sólo eliminamos ~3 syncs por forward.
-- Lo más informativo: variance 6.7× menor. La baseline tenía picos por syncs impredecibles; la fast es consistente.
-- Con E=8 (SEGMENTS=2) o E=16 (SEGMENTS=4) el speedup crecería porque la cantidad de syncs eliminados escala con E.
+- Ganancia mínima (1.02×) en esta corrida. La variance alta de la Fast (±9 ms) sugiere que hubo carga externa durante el bench; la ganancia estructural (menos syncs) sigue estando pero el número medido es ruidoso.
+- Con E=4 sólo eliminamos ~3 syncs por forward. Con E=8 (SEGMENTS=2) o E=16 (SEGMENTS=4) el speedup crecería porque la cantidad de syncs eliminados escala con E.
 - Direcciones sin probar (potencial más ganancia): batched experts con `torch.bmm` + padding a capacidad fija (Megablocks-style).
 
 ### Experimentos adicionales — dos variantes que empeoraron
@@ -199,11 +198,10 @@ Cuatro variantes probadas en total. Solo `MoELayerFast` ganó. Las otras tres em
 
 | Variante | Tiempo | vs baseline | Correctitud |
 |---|---:|---:|:---|
-| MoELayer (V) | 12.94 ± 2.96 ms | 1.00× | ✓ referencia |
-| **MoELayerFast (IX)** | **10.45 ± 0.44 ms** | **1.24×** | ✓ equivalente numéricamente (max diff ~1e-7) |
-| MoELayerFast + torch.compile | 24.45 ± 1.74 ms | 0.53× | ✓ pero 1.9× más lenta |
-| MoELayerBatched (cap=1.5, bmm+pad) | 13.40 ± 0.39 ms | 0.97× | padding + descartes posibles |
-| MoELayerBatched (cap=1.0, bmm+pad) | 14.16 ± 4.54 ms | 0.91× | descartes más probables → mayor variance |
+| MoELayer (V) | 12.54 ± 1.54 ms | 1.00× | ✓ referencia |
+| **MoELayerFast (IX)** | **12.27 ± 9.01 ms** | **1.02×** | ✓ equivalente numéricamente (max diff ~1e-7) |
+| MoELayerFast + torch.compile | 24.01 ± 0.94 ms | 0.52× | ✓ pero 1.9× más lenta |
+| MoELayerBatched (cap=1.5, bmm+pad) | 14.76 ± 2.72 ms | 0.85× | padding + descartes posibles |
 
 **Por qué `torch.compile` empeoró**:
 1. MPS no tiene backend maduro para el compile de PyTorch (no genera kernels fusionados como CUDA con Triton). Cae a paths eager con overhead extra.
@@ -229,24 +227,24 @@ Cuatro variantes probadas en total. Solo `MoELayerFast` ganó. Las otras tres em
 
 | Epoch | Train (ce) | Val (ce) | Aux |
 |:---:|---:|---:|---:|
-| 1 | 3.0028 | 2.1328 | 1.3128 |
-| 2 | 2.1929 | 2.0329 | 1.3715 |
+| 1 | 3.0026 | 2.1321 | 1.3227 |
+| 2 | 2.2022 | 2.0277 | 1.3919 |
 
-- Val loss final: 2.03 vs 1.86 del MoE original — 9% peor por el precio del balanceo.
-- Aux se estabilizó en ~1.37 (mínimo teórico 1.0 con balance perfecto, máximo 4.0 con colapso total).
+- Val loss final: 2.03 vs 1.89 del MoE original — 7% peor por el precio del balanceo.
+- Aux se estabilizó en ~1.39 (mínimo teórico 1.0 con balance perfecto, máximo 4.0 con colapso total).
 
 **Utilización comparativa (val_loader):**
 
 | Capa | e0 | e1 | e2 | e3 | Diagnóstico |
 |:---:|---:|---:|---:|---:|:---|
-| MoE original 1 | 0.609 | 0.469 | 0.537 | 0.386 | balanceada |
-| MoE balanced 1 | 0.435 | 0.425 | 0.537 | 0.603 | balanceada (más apretada al ideal 0.5) |
-| MoE original 2 | 0.00005 | 0.999 | 0.016 | 0.985 | colapso total (2 expertos muertos) |
-| MoE balanced 2 | 0.221 | 0.503 | 0.276 | 0.9999 | mejora parcial: e0/e2 resucitados, e3 sigue dominante |
+| MoE original 1 | 0.414 | 0.624 | 0.666 | 0.296 | balanceada |
+| MoE balanced 1 | 0.383 | 0.770 | 0.434 | 0.413 | balanceada, aunque con e1 sobresaliendo |
+| MoE original 2 | 0.001 | 0.001 | 0.999 | 0.999 | colapso total (2 expertos muertos) |
+| MoE balanced 2 | 1.00 | 0.052 | 0.744 | 0.204 | reconfiguración: e0 pasa a dominar, e2 se activa moderadamente, e3 baja mucho, e1 sigue casi muerto |
 
 **Observaciones:**
-- La aux loss evitó las muertes de expertos (e0 pasó de 0.005% a 22%, e2 de 1.6% a 28%) pero no logró desplazar a e3 (0.985 → 0.9999). Mejora parcial, no balance completo.
-- Con `alpha=0.01` la aux loss llegó a su mínimo local viable: verificado matemáticamente que `L_aux = E * sum(f²) ≈ 1.38` con la distribución observada, coincide con el aux observado 1.37. El modelo alcanzó un óptimo donde P sigue a f, pero f está lejos del uniforme porque e3 es estructuralmente "necesario" para la tarea principal.
+- La aux loss reconfiguró el ruteo de forma dramática pero no logró balance uniforme. En el MoE original la Capa 2 tenía e2 y e3 dominando y e0/e1 muertos; en el balanced la Capa 2 pasa a tener e0 dominante (100%), e2 moderado (74%), e3 bajo (20%) y e1 aún muy poco activo (5%). No es balance, es un óptimo local distinto.
+- Con `alpha=0.01` la aux loss llegó a su mínimo local viable: verificado matemáticamente que `L_aux = E * sum(f²) ≈ 1.40` con la distribución observada, coincide con el aux observado 1.39. El modelo alcanzó un óptimo donde P sigue a f, pero f está lejos del uniforme porque un experto sigue absorbiendo la mayor parte de los tokens.
 - Con `alpha` más grande (0.05 o 0.1) probablemente forzaría a mover e3, a costa de más degradación en val loss. Trade-off explícito entre balance y performance.
 
 **Conclusión educativa:** la aux loss funciona, pero a esta escala (100k chars, modelo chico, 2 epochs) el trade-off no gana claramente. Evita el colapso completo pero degrada la calidad. En modelos grandes con corpus abundantes esta técnica es lo que permite que MoE escale sin colapsar; a escala chica, quizás sea mejor dejar que el modelo "colapse" a usar 2 expertos como si fuera denso.
