@@ -250,3 +250,27 @@ Cuatro variantes probadas en total. Solo `MoELayerFast` ganó. Las otras tres em
 **Conclusión educativa:** la aux loss funciona, pero a esta escala (100k chars, modelo chico, 2 epochs) el trade-off no gana claramente. Evita el colapso completo pero degrada la calidad. En modelos grandes con corpus abundantes esta técnica es lo que permite que MoE escale sin colapsar; a escala chica, quizás sea mejor dejar que el modelo "colapse" a usar 2 expertos como si fuera denso.
 
 ---
+
+# TP-II — instruction tuning y LoRA
+
+Corridas del TP-II. Base: checkpoint del TP-I Consigna X (`tp1_subword/checkpoint_final.pt`), mismo `tinygpt.py` y `trainer.py`.
+
+<!-- Plantilla por consigna:
+
+## YYYY-MM-DD — TP-II — Consigna N — <título>
+
+**Config:** hardware, hiperparámetros relevantes, seed, checkpoint base.
+**Métricas:** exact match, continuation_quality, loss de Shakespeare, params entrenables, etc.
+**Observaciones:** qué se vio, qué llamó la atención, hipótesis.
+
+-->
+
+<!-- Pendientes:
+- Consigna I — dataset SFT con prompt loss masking + PackedInstructionDataset.
+- Consigna II — fine-tuning completo + 6 preguntas.
+- Consigna III — LoRA desde cero (LoRALinear + apply_lora + gradiente enmascarado sobre embedding).
+- Consigna IV — olvido catastrófico (loss Shakespeare en los 3 modelos).
+- Consigna V — chat() con parada en <|end|> y supresión de logits especiales.
+- Consigna VI — atención en la posición de <|assistant|>.
+- Opcional — TinyGPT desde cero vs fine-tuneado.
+-->
